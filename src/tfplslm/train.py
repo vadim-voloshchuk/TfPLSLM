@@ -176,12 +176,20 @@ def train(config,out,resume=None):
     started=time.time(); model=make_model(config['model']).cuda(); opt=optimizer_for(model,config['lr'],config['weight_decay'])
     batcher=SequentialBatcher([Documents(config['data'],'train'),Documents(config['data'],'synthetic')],
         config['batch_size'],model.cfg.memory_chunk*config['unroll_chunks'],config['seed'])
-    step=tokens=0; state=None; source_tokens=[0,0]
+    step=tokens=0; state=None; source_tokens=[0,0]; elapsed_before=0.
     if resume:
         ckpt,state=load_checkpoint(resume,model,opt,batcher); step=ckpt['step']; tokens=ckpt['tokens_seen']
         source_tokens=ckpt.get('extra',{}).get('source_tokens',[0,0])
+        elapsed_before=ckpt.get('extra',{}).get('elapsed_seconds',0.)
+        if not elapsed_before and (out/'final_training.json').exists():
+            elapsed_before=json.loads((out/'final_training.json').read_text()).get('seconds',0.)
+        write_json(out/'resume_event.json',{'step':step,'tokens_seen':tokens,
+            'active_document_rows':sum(row is not None for row in batcher.rows),
+            'state_restored':state is not None,'elapsed_before':elapsed_before,
+            'optimizer_parameter_states':len(opt.state),'checkpoint_git_commit':ckpt['git_commit']})
     last_save=last_log=time.time(); last_tokens=tokens; loader_wait=0.; loss_sum=0.; interval=0
-    initial=validate(model,config['data']); write_json(out/'initial_validation.json',initial)
+    initial=validate(model,config['data'])
+    write_json(out/('resume_validation.json' if resume else 'initial_validation.json'),initial)
     print(json.dumps(initial),flush=True); torch.cuda.reset_peak_memory_stats()
     stop_reason='token_budget'
     slow_intervals=0
@@ -209,7 +217,7 @@ def train(config,out,resume=None):
                 torch.cuda.synchronize(); now=time.time()
                 metric={'step':step,'tokens_seen':tokens,'source_tokens':source_tokens.copy(),
                         'loss':(loss_sum/interval).item(),'lr':lr,'gradient_norm':grad.item(),
-                        'tokens_per_sec':(tokens-last_tokens)/(now-last_log),'elapsed_seconds':now-started,
+                        'tokens_per_sec':(tokens-last_tokens)/(now-last_log),'elapsed_seconds':elapsed_before+now-started,
                         'dataloader_wait_seconds':loader_wait,'peak_allocated_gib':torch.cuda.max_memory_allocated()/2**30,
                         'cpu_percent':psutil.cpu_percent(),**gpu_stats(),**state_stats(state,diag)}
                 log.write(json.dumps(metric)+'\n'); print(json.dumps(metric),flush=True)
@@ -220,12 +228,15 @@ def train(config,out,resume=None):
                 if slow_intervals>=3:
                     stop_reason='sustained_throughput_below_15k'; break
             if time.time()-last_save>=config['checkpoint_seconds']:
-                save_checkpoint(out/'last.pt',model,opt,state,batcher,step,tokens,config,{'source_tokens':source_tokens})
+                save_checkpoint(out/'last.pt',model,opt,state,batcher,step,tokens,config,
+                                {'source_tokens':source_tokens,'elapsed_seconds':elapsed_before+time.time()-started})
                 val=validate(model,config['data']); val.update(step=step,tokens_seen=tokens)
                 log.write(json.dumps(val)+'\n'); print(json.dumps(val),flush=True); last_save=time.time()
-        save_checkpoint(out/'last.pt',model,opt,state,batcher,step,tokens,config,{'source_tokens':source_tokens})
+        save_checkpoint(out/'last.pt',model,opt,state,batcher,step,tokens,config,
+                        {'source_tokens':source_tokens,'elapsed_seconds':elapsed_before+time.time()-started})
         final=validate(model,config['data'],batches=32)
-        final.update(step=step,tokens_seen=tokens,source_tokens=source_tokens,seconds=time.time()-started,stop_reason=stop_reason)
+        final.update(step=step,tokens_seen=tokens,source_tokens=source_tokens,
+                     seconds=elapsed_before+time.time()-started,stop_reason=stop_reason)
         write_json(out/'final_training.json',final); print(json.dumps(final),flush=True)
 
 

@@ -46,7 +46,9 @@ for name,base_config in [('poc','configs/poc_70m.json'),('ssm','configs/baseline
     pilot_metrics=[json.loads(line) for line in Path('artifacts/short_real/metrics.jsonl').read_text().splitlines()]
     rates=[m['tokens_per_sec'] for m in pilot_metrics if m.get('step',0)>=20 and 'tokens_per_sec' in m]
     actual_rate=sum(rates)/len(rates) if rates else short['tokens_seen']/short['seconds']
-    expected=350e6/max(actual_rate,25000)
+    final_path=Path(f'artifacts/{name}/final_training.json')
+    completed_tokens=read(final_path).get('tokens_seen',0) if final_path.exists() else 0
+    expected=max(0,350e6-completed_tokens)/max(actual_rate,25000)
     reserve=45*60
     if remaining<expected+reserve:
         Path(f'artifacts/{name}_skipped.json').write_text(json.dumps({'reason':'insufficient budget',
@@ -54,9 +56,17 @@ for name,base_config in [('poc','configs/poc_70m.json'),('ssm','configs/baseline
         break
     cfg=read(base_config);cfg['max_seconds']=int(min(remaining-reserve,4*3600))
     cfg_path=f'configs/{name}_run.json';Path(cfg_path).write_text(json.dumps(cfg,indent=2))
-    run(['-m','tfplslm.train','--mode','train','--config',cfg_path,'--out',f'artifacts/{name}'],f'artifacts/{name}.log')
-    run(['-m','tfplslm.evaluate','--checkpoint',f'artifacts/{name}/last.pt',
-         '--config','configs/eval_memory.json' if name=='poc' else 'configs/eval_ssm.json',
-         '--out',f'artifacts/{name}/eval'],f'artifacts/{name}_eval.log')
+    if completed_tokens<cfg['tokens']:
+        command=['-m','tfplslm.train','--mode','train','--config',cfg_path,'--out',f'artifacts/{name}']
+        checkpoint=Path(f'artifacts/{name}/last.pt')
+        if checkpoint.exists():
+            command+=['--resume',str(checkpoint)]
+            log=Path(f'artifacts/{name}.log')
+            if log.exists(): log.rename(log.with_name(f'{name}.before_resume_{int(time.time())}.log'))
+        run(command,f'artifacts/{name}.log')
+    eval_config='configs/eval_memory.json' if name=='poc' else 'configs/eval_ssm.json'
+    if not Path(f'artifacts/{name}/eval/memory_timing.json').exists():
+        run(['-m','tfplslm.evaluate','--checkpoint',f'artifacts/{name}/last.pt',
+             '--config',eval_config,'--out',f'artifacts/{name}/eval'],f'artifacts/{name}_eval.log')
 Path('artifacts/experiment_complete.json').write_text(json.dumps({'completed_at':time.time()}))
 print('EXPERIMENT_COMPLETE',flush=True)
