@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+artifacts/
+*.pt
+*.pth
+*.bin
+*.parquet
+.env*
+*.pem
+*.key
+id_*
+work/
