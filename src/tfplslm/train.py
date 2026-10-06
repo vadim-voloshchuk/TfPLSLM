@@ -5,6 +5,7 @@ import math
 import os
 import random
 import subprocess
+import signal
 import time
 from pathlib import Path
 import numpy as np
@@ -159,7 +160,7 @@ def benchmark(config,out,steps=110):
         losses.append(loss.item())
         if step>=10: times.append(elapsed)
         if step%10==0: print(json.dumps({'step':step,'seconds':elapsed,'tokens_per_sec':B*L/elapsed,'loss':losses[-1]}),flush=True)
-    speed=B*L/np.mean(times)
+    speed=float(B*L/np.mean(times))
     result={'batch_size':B,'unroll_chunks':config['unroll_chunks'],'sequence_chunk':model.cfg.memory_chunk,
             'parameters':sum(p.numel() for p in model.parameters()),'stable_steps':len(times),
             'tokens_per_sec':speed,'step_seconds_mean':float(np.mean(times)),
@@ -183,9 +184,13 @@ def train(config,out,resume=None):
     initial=validate(model,config['data']); write_json(out/'initial_validation.json',initial)
     print(json.dumps(initial),flush=True); torch.cuda.reset_peak_memory_stats()
     stop_reason='token_budget'
+    slow_intervals=0
+    stop_requested=[False]
+    signal.signal(signal.SIGTERM,lambda *_:stop_requested.__setitem__(0,True))
+    signal.signal(signal.SIGINT,lambda *_:stop_requested.__setitem__(0,True))
     with open(out/'metrics.jsonl','a',buffering=1) as log:
         while tokens<config['tokens']:
-            if time.time()-started>config['max_seconds'] or (out/'STOP').exists():
+            if stop_requested[0] or time.time()-started>config['max_seconds'] or (out/'STOP').exists():
                 stop_reason='wall_clock_or_stop_file'; break
             tick=time.perf_counter(); xx,yy,rr,src=batcher.next()
             x=torch.from_numpy(xx).cuda(); y=torch.from_numpy(yy).cuda()
@@ -208,9 +213,12 @@ def train(config,out,resume=None):
                         'dataloader_wait_seconds':loader_wait,'peak_allocated_gib':torch.cuda.max_memory_allocated()/2**30,
                         'cpu_percent':psutil.cpu_percent(),**gpu_stats(),**state_stats(state,diag)}
                 log.write(json.dumps(metric)+'\n'); print(json.dumps(metric),flush=True)
-                if not math.isfinite(metric['loss']) or metric['ssm_max_abs']>1e6:
+                if not math.isfinite(metric['loss']) or metric.get('ssm_max_abs',0)>1e6:
                     raise RuntimeError('Nonfinite loss or exploding state')
                 last_log=now; last_tokens=tokens; loader_wait=0.; loss_sum=0.; interval=0
+                slow_intervals=slow_intervals+1 if step>=60 and metric['tokens_per_sec']<15000 else 0
+                if slow_intervals>=3:
+                    stop_reason='sustained_throughput_below_15k'; break
             if time.time()-last_save>=config['checkpoint_seconds']:
                 save_checkpoint(out/'last.pt',model,opt,state,batcher,step,tokens,config,{'source_tokens':source_tokens})
                 val=validate(model,config['data']); val.update(step=step,tokens_seen=tokens)

@@ -89,7 +89,7 @@ class StateBlock(nn.Module):
         z, raw, dt = self.proj(self.norm(x)).split(
             [self.inner, self.inner + 2 * cfg.d_state, self.heads], dim=-1)
         raw = torch.cat((history.to(raw.dtype), raw.transpose(1, 2)), dim=-1)
-        history = raw[:, :, -(cfg.conv_width - 1):]
+        history = raw[:, :, -(cfg.conv_width - 1):].contiguous()
         convolved = F.silu(self.conv(raw).transpose(1, 2))
         u, b, c = convolved.split([self.inner, cfg.d_state, cfg.d_state], dim=-1)
         u = u.reshape(*u.shape[:2], self.heads, cfg.head_dim)

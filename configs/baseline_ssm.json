@@ -14,7 +14,7 @@
     "memory_chunk": 512,
     "backend": "triton"
   },
-  "batch_size": 32,
+  "batch_size": 64,
   "unroll_chunks": 2,
   "tokens": 350000000,
   "lr": 0.0006,

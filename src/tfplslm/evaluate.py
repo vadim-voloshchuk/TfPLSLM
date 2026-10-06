@@ -22,13 +22,35 @@ def state_bytes(state):
 @torch.no_grad()
 def consume(model,ids,state=None,disable_memory=False):
     last=None
-    for start in range(0,ids.shape[1],model.cfg.memory_chunk):
-        part=ids[:,start:start+model.cfg.memory_chunk]
-        # Callers pass boundary-aligned sequences, except the final prompt tail.
+    start=0
+    while start<ids.shape[1]:
+        remaining=model.cfg.memory_chunk-(state['position'] if state else 0)
+        part=ids[:,start:start+remaining]
         with torch.autocast('cuda',dtype=torch.bfloat16):
             hidden,state,_=model(part,state,disable_memory=disable_memory,return_hidden=True)
             last=model.lm_head(hidden[:,-1:]).float()
+        start+=part.shape[1]
     return last,state
+
+
+@torch.no_grad()
+def score_answers(model,last,state,answers,disable_memory=False):
+    length=max(map(len,answers)); batch=len(answers)
+    target=torch.full((batch,length),-100,device='cuda',dtype=torch.long)
+    for i,answer in enumerate(answers): target[i,:len(answer)]=torch.tensor(answer,device='cuda')
+    inputs=target[:,:-1].clamp_min(0)
+    predictions=[last]
+    start=0
+    while start<inputs.shape[1]:
+        remaining=model.cfg.memory_chunk-state['position']
+        part=inputs[:,start:start+remaining]
+        with torch.autocast('cuda',dtype=torch.bfloat16):
+            hidden,state,_=model(part,state,disable_memory=disable_memory,return_hidden=True)
+            predictions.append(model.lm_head(hidden).float())
+        start+=part.shape[1]
+    logits=torch.cat(predictions,1)
+    loss=torch.nn.functional.cross_entropy(logits.flatten(0,1),target.flatten(),ignore_index=-100,reduction='none').reshape(batch,length)
+    return (loss.sum(1)/(target!=-100).sum(1)).cpu().tolist()
 
 
 @torch.no_grad()
@@ -77,6 +99,7 @@ def memory_eval(model,sp,config,out):
                         state=tree_map(lambda x:x.roll(1,0),state)
                 before=state_bytes(state)
                 last,state=consume(model,ids[:,cut:],state,disable_memory=disabled)
+                answer_nll=score_answers(model,last,state,[a for p,a,m in cases],disable_memory=disabled)
                 predicted,_=generate_from_state(model,last,state,32,sp.eos_id(),disable_memory=disabled)
                 decoded=[sp.decode(row.tolist()).strip() for row in predicted.cpu()]
                 correct=[]; donor_match=[]
@@ -88,13 +111,14 @@ def memory_eval(model,sp,config,out):
                     donor=cases[(i-1)%len(cases)][2]['answer']
                     donor_match.append(cleaned==donor)
                     details.append({**meta,'mode':mode,'prediction':text,'correct':hit,'donor_answer':donor,
-                                    'prompt_tokens':length,'history_state_bytes':before,'index':i})
+                                    'prompt_tokens':length,'history_state_bytes':before,'index':i,'answer_nll':answer_nll[i]})
                 n=len(correct); hits=sum(correct); acc=hits/n
                 # Wilson interval prevents presenting tiny samples as precise.
                 z=1.96; center=(acc+z*z/(2*n))/(1+z*z/n)
                 half=z*math.sqrt(acc*(1-acc)/n+z*z/(4*n*n))/(1+z*z/n)
                 metric={'distance':distance,'category':category,'mode':mode,'correct':hits,'n':n,
                         'accuracy':acc,'ci95':[max(0,center-half),min(1,center+half)],
+                        'mean_answer_nll':float(np.mean(answer_nll)),
                         'donor_answer_accuracy':sum(donor_match)/n,'state_bytes':before,
                         'peak_allocated_gib':torch.cuda.max_memory_allocated()/2**30,'seconds':time.time()-begin}
                 results.append(metric); print(json.dumps(metric),flush=True)

@@ -54,7 +54,19 @@ def task(rng, category, split='train'):
 
 def token_task(sp, rng, category, distance, split='train'):
     fact, question, answer = task(rng, category, split)
-    prefix = [sp.bos_id()] + sp.encode(fact)
+    # Put obsolete and replacement facts in different chunks. The final gap
+    # still measures distance from the latest relevant fact to the question.
+    update_gap=0
+    if category in ['overwrite','forget']:
+        marker='Затем' if category=='overwrite' else 'Новый действующий'
+        old,new=fact.split(marker,1)
+        old_ids=sp.encode(old); new_ids=sp.encode(marker+new)
+        update_gap=512
+        between=[]
+        while len(between)<update_gap: between.extend(sp.encode(rng.choice(FILLERS)))
+        prefix=[sp.bos_id()]+old_ids+between[:update_gap]+new_ids
+    else:
+        prefix = [sp.bos_id()] + sp.encode(fact)
     # Distance is exactly the number of token positions from the end of the
     # fact to the beginning of the question, not characters or total length.
     filler = []
@@ -64,4 +76,4 @@ def token_task(sp, rng, category, distance, split='train'):
     answer_ids = sp.encode(' ' + answer) + [sp.eos_id()]
     return prompt, answer_ids, {'category':category, 'distance':distance,
                                'fact_end':len(prefix), 'question_start':len(prefix)+distance,
-                               'answer':answer, 'fact':fact, 'question':question}
+                               'answer':answer, 'fact':fact, 'question':question,'update_gap':update_gap}

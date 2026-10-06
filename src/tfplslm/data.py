@@ -1,5 +1,6 @@
 """Pinned streaming corpus, SentencePiece, uint16 documents, sequential batches."""
 import argparse
+import copy
 import hashlib
 import json
 import random
@@ -94,6 +95,7 @@ def prepare(args):
         prompt,answer,_=token_task(sp,rng,category,distance,'train')
         synth.add(prompt+answer)
     manifest['synthetic']=synth.close()
+    manifest['synthetic_generator']='v2: obsolete/replacement facts separated by 512 tokens'
     manifest['seconds']=time.time()-started
     manifest['exact_train_validation_overlap']=len(train_seen & val_hashes)
     (root/'manifest.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
@@ -117,7 +119,15 @@ next document. No JSON parsing or tokenization occurs in the training hot path.
 """
     def __init__(self, corpora, batch_size, length, seed=1, synthetic_fraction=1/7):
         self.corpora=corpora; self.batch=batch_size; self.length=length
-        self.rng=np.random.default_rng(seed); self.synthetic_fraction=synthetic_fraction
+        self.rng=np.random.default_rng(seed)
+        self.synthetic_fraction=synthetic_fraction
+        if len(corpora)>1:
+            # Choose documents with inverse-length correction so the requested
+            # mixture is a token ratio, not a document-count ratio.
+            mean0=float(np.diff(corpora[0].offsets).mean()-1)
+            mean1=float(np.diff(corpora[1].offsets).mean()-1)
+            self.synthetic_fraction=(synthetic_fraction*mean0)/(
+                (1-synthetic_fraction)*mean1+synthetic_fraction*mean0)
         self.rows=[None]*batch_size
 
     def next(self):
@@ -137,8 +147,9 @@ next document. No JSON parsing or tokenization occurs in the training hot path.
             self.rows[i]=None if pos+count>=len(doc)-1 else [source,docid,pos+count]
         return x,y,reset,sources
 
-    def state_dict(self): return {'rows':self.rows,'rng':self.rng.bit_generator.state}
-    def load_state_dict(self,d): self.rows=d['rows']; self.rng.bit_generator.state=d['rng']
+    def state_dict(self): return copy.deepcopy({'rows':self.rows,'rng':self.rng.bit_generator.state})
+    def load_state_dict(self,d):
+        self.rows=copy.deepcopy(d['rows']); self.rng.bit_generator.state=copy.deepcopy(d['rng'])
 
 
 if __name__=='__main__':
