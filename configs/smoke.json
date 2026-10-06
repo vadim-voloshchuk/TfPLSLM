@@ -1,0 +1,4 @@
+{
+  "model": {"vocab_size":256,"d_model":64,"layers":2,"d_state":16,"expand":2,"head_dim":16,"ff_dim":128,"conv_width":4,"scan_chunk":32,"memory_slots":4,"memory_dim":16,"memory_chunk":64,"backend":"triton"},
+  "batch_size":4,"unroll_chunks":2,"lr":0.003,"seed":123,"steps":180
+}

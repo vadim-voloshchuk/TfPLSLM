@@ -1,0 +1,1 @@
+{"distances":[512,2048,8192,32768],"categories":["semantic","exact","associative","overwrite","forget","temporal","multihop"],"examples_per_category":32,"seed":9072026,"ablations":["normal","zero","reset","shuffle","no_memory"]}

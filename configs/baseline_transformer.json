@@ -1,0 +1,30 @@
+{
+  "model": {
+    "vocab_size": 16384,
+    "d_model": 512,
+    "layers": 16,
+    "d_state": 64,
+    "expand": 2,
+    "head_dim": 64,
+    "ff_dim": 1536,
+    "conv_width": 4,
+    "scan_chunk": 128,
+    "memory_slots": 0,
+    "memory_dim": 256,
+    "memory_chunk": 512,
+    "backend": "triton",
+    "architecture": "transformer"
+  },
+  "batch_size": 32,
+  "unroll_chunks": 2,
+  "tokens": 350000000,
+  "lr": 0.0006,
+  "min_lr_ratio": 0.1,
+  "weight_decay": 0.1,
+  "warmup_steps": 100,
+  "seed": 20261007,
+  "log_every": 20,
+  "checkpoint_seconds": 900,
+  "max_seconds": 14400,
+  "data": "data"
+}

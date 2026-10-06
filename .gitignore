@@ -13,3 +13,6 @@ artifacts/
 *.key
 id_*
 work/
+vendor/
+SOURCE_COMMIT
+*.egg-info/
