@@ -9,7 +9,8 @@ import numpy as np
 import sentencepiece as spm
 import torch
 from .model import make_model, tree_map
-from .train import seed_all, validate, state_stats, write_json
+from .train import seed_all, validate, state_stats, write_json, reset_rows
+from .data import Documents, SequentialBatcher
 from .synthetic import token_task, FILLERS
 
 
@@ -17,6 +18,31 @@ def state_bytes(state):
     values=[]
     tree_map(lambda x:values.append(x.numel()*x.element_size()) or x,state)
     return sum(values)
+
+
+@torch.no_grad()
+def lm_ablations(model,data_root,out,batches=32):
+    rows=[]
+    for mode in ['normal','zero','reset','shuffle','no_memory']:
+        batcher=SequentialBatcher([Documents(data_root,'validation')],8,model.cfg.memory_chunk*2,seed=989)
+        state=None; total=0; loss_sum=0.
+        for update in range(batches):
+            xx,yy,rr,_=batcher.next(); ids=torch.from_numpy(xx).cuda(); labels=torch.from_numpy(yy).cuda()
+            state=reset_rows(state,torch.from_numpy(rr).cuda())
+            if mode=='reset': state=None
+            for x,y in zip(ids.chunk(2,1),labels.chunk(2,1)):
+                if mode=='zero': state=None
+                if mode=='shuffle' and state is not None: state=tree_map(lambda t:t.roll(1,0),state)
+                with torch.autocast('cuda',dtype=torch.bfloat16):
+                    h,state,_=model(x,state,disable_memory=mode=='no_memory',return_hidden=True)
+                    logits=model.lm_head(h).float()
+                loss=torch.nn.functional.cross_entropy(logits.flatten(0,1),y.flatten(),ignore_index=-100,reduction='sum')
+                loss_sum+=loss.item(); total+=int((y!=-100).sum())
+        rows.append({'mode':mode,'tokens':total,'loss':loss_sum/total,'perplexity':math.exp(loss_sum/total)})
+        print('LM_ABLATION',json.dumps(rows[-1]),flush=True)
+    normal=rows[0]['loss']
+    for row in rows: row['loss_delta_from_normal']=row['loss']-normal
+    write_json(out/'lm_ablations.json',rows)
 
 
 @torch.no_grad()
@@ -196,4 +222,6 @@ if __name__=='__main__':
     out=Path(args.out); out.mkdir(parents=True,exist_ok=True)
     write_json(out/'validation.json',validate(model,ckpt['config']['data'],batches=64)); model.eval()
     samples(model,sp,out); counterfactual(model,sp,out); memory_scaling(model,out)
+    lm_ablations(model,ckpt['config']['data'],out)
     if not args.skip_memory: memory_eval(model,sp,json.loads(Path(args.config).read_text()),out)
+
