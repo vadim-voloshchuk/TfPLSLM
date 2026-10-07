@@ -1,4 +1,4 @@
-"""Seed-separated Russian memory tasks; answers never occur in filler."""
+"""Seed-separated Russian memory tasks with task-independent filler."""
 import random
 
 CATEGORIES = ['semantic', 'exact', 'associative', 'overwrite', 'forget', 'temporal', 'multihop']

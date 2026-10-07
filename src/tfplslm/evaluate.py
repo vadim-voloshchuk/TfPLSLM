@@ -182,6 +182,32 @@ def samples(model,sp,out):
     write_json(out/'generation_samples.json',rows)
 
 
+@torch.no_grad()
+def transformer_samples(model,sp,out):
+    """Recompute a sliding token window; never reset to one-token context."""
+    rows=[]
+    prompts=['Однажды вечером в маленьком городе','Почему небо кажется синим?',
+             'Научный эксперимент показал, что','История России тесно связана с',
+             'Анна открыла дверь и увидела']
+    device=model.embedding.weight.device
+    for prompt in prompts:
+        ids=torch.tensor([[sp.bos_id()]+sp.encode(prompt)],device=device)
+        generated=[]
+        for _ in range(160):
+            with torch.autocast(device.type,dtype=torch.bfloat16,enabled=device.type=='cuda'):
+                hidden,_,_=model(ids[:,-model.cfg.memory_chunk:],return_hidden=True)
+                logits=model.lm_head(hidden[:,-1]).float()/.8
+            top=torch.topk(logits,min(40,logits.shape[-1]),dim=-1).values[:,-1:]
+            token=torch.multinomial(logits.masked_fill(logits<top,-float('inf')).softmax(-1),1)
+            generated.append(token.item());ids=torch.cat((ids,token),dim=1)
+            if token.item()==sp.eos_id(): break
+        rows.append({'prompt':prompt,'continuation':sp.decode(generated)})
+    write_json(out/'generation_samples.json',rows)
+    write_json(out/'evaluation_scope.json',{'architecture':'transformer','context_window':model.cfg.memory_chunk,
+        'method':'sliding token window, recomputed without KV cache',
+        'memory_ablations':'not applicable: no persistent recurrent state in this baseline'})
+
+
 def counterfactual(model,sp,out):
     # Identical continuation, two different factual prefixes, interventions on
     # SSM-only vs explicit-memory-only as well as the complete recurrent state.
@@ -221,7 +247,10 @@ if __name__=='__main__':
     sp=spm.SentencePieceProcessor(model_file=ckpt['config']['data']+'/tokenizer.model')
     out=Path(args.out); out.mkdir(parents=True,exist_ok=True)
     write_json(out/'validation.json',validate(model,ckpt['config']['data'],batches=64)); model.eval()
-    samples(model,sp,out); counterfactual(model,sp,out); memory_scaling(model,out)
-    lm_ablations(model,ckpt['config']['data'],out)
-    if not args.skip_memory: memory_eval(model,sp,json.loads(Path(args.config).read_text()),out)
+    if model.cfg.architecture=='transformer':
+        transformer_samples(model,sp,out)
+    else:
+        samples(model,sp,out); counterfactual(model,sp,out); memory_scaling(model,out)
+        lm_ablations(model,ckpt['config']['data'],out)
+        if not args.skip_memory: memory_eval(model,sp,json.loads(Path(args.config).read_text()),out)
 

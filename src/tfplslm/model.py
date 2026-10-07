@@ -200,6 +200,10 @@ class TransformerLM(nn.Module):
         self.lm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
         self.lm_head.weight = self.embedding.weight
         nn.init.normal_(self.embedding.weight, std=.02)
+        nn.init.normal_(self.position.weight, std=.02)
+        for block in self.blocks:
+            nn.init.normal_(block.self_attn.out_proj.weight, std=.02/math.sqrt(2*cfg.layers))
+            nn.init.normal_(block.linear2.weight, std=.02/math.sqrt(2*cfg.layers))
 
     def initial_state(self, *args, **kwargs): return None
 
