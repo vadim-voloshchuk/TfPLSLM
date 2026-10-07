@@ -169,6 +169,49 @@ def memory_scaling(model,out):
     write_json(out/'memory_scaling.json',rows)
 
 
+@torch.no_grad()
+def slot_diagnostics(model,data_root,out,batches=32):
+    """Measure updates only on full, within-document chunks, without padding."""
+    if not model.cfg.memory_slots:
+        write_json(out/'slot_diagnostics.json',{'applicable':False})
+        return
+    batcher=SequentialBatcher([Documents(data_root,'validation')],8,model.cfg.memory_chunk*2,seed=989)
+    state=None; observations=[]; changes=[]; gates={'retain':[],'write':[]}
+    for _ in range(batches):
+        xx,yy,rr,_=batcher.next()
+        state=reset_rows(state,torch.from_numpy(rr).cuda())
+        for part,(x,y) in enumerate(zip(np.split(xx,2,1),np.split(yy,2,1))):
+            previous=state['memory'] if state else model.initial_state(8)['memory']
+            with torch.autocast('cuda',dtype=torch.bfloat16):
+                _,state,diag=model(torch.from_numpy(x).cuda(),state,return_hidden=True)
+            full=(y!=-100).all(1)
+            if full.any():
+                mask=torch.from_numpy(full).cuda()
+                observations.append(state['memory'][mask].cpu())
+                for key in gates:gates[key].append(diag[key][mask].cpu())
+            continued=full & (~rr if part==0 else np.ones(8,dtype=bool))
+            if continued.any():
+                mask=torch.from_numpy(continued).cuda()
+                changes.append((state['memory']-previous)[mask].square().mean(-1).sqrt().cpu())
+    values=torch.cat(observations).numpy()
+    delta=torch.cat(changes).numpy()
+    flat=values.transpose(1,0,2).reshape(model.cfg.memory_slots,-1)
+    corr=np.nan_to_num(np.corrcoef(flat))
+    off=corr[~np.eye(model.cfg.memory_slots,dtype=bool)]
+    result={'applicable':True,'complete_chunk_rows':len(values),'continued_chunk_rows':len(delta),
+        'slot_rms':np.sqrt(np.mean(values**2,axis=(0,2))).tolist(),
+        'slot_update_rms_mean':delta.mean(0).tolist(),
+        'nearly_unchanged_slot_fraction':float(np.mean(delta<1e-5)),
+        'nearly_unchanged_threshold':1e-5,
+        'pearson_slot_correlation':corr.tolist(),
+        'mean_absolute_off_diagonal_correlation':float(np.abs(off).mean()),
+        'scope':'32 held-out batches; padded rows excluded; update deltas exclude document resets'}
+    for key,parts in gates.items():
+        a=torch.cat(parts).numpy()
+        result[key+'_quantiles_01_10_50_90_99']=np.quantile(a,[.01,.1,.5,.9,.99]).tolist()
+    write_json(out/'slot_diagnostics.json',result)
+
+
 def samples(model,sp,out):
     prompts=['Однажды вечером в маленьком городе','Почему небо кажется синим?',
              'Научный эксперимент показал, что','История России тесно связана с',
@@ -251,6 +294,7 @@ if __name__=='__main__':
         transformer_samples(model,sp,out)
     else:
         samples(model,sp,out); counterfactual(model,sp,out); memory_scaling(model,out)
+        slot_diagnostics(model,ckpt['config']['data'],out)
         lm_ablations(model,ckpt['config']['data'],out)
         if not args.skip_memory: memory_eval(model,sp,json.loads(Path(args.config).read_text()),out)
 
