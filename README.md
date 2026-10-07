@@ -45,6 +45,22 @@ python -m tfplslm.train --mode train --config configs/poc_70m.json --out artifac
 python -m tfplslm.evaluate --checkpoint artifacts/poc/last.pt --out artifacts/poc/eval
 ```
 
+The independently trained recurrent control and optional Transformer control use
+the same tokenizer, document sampler seed and 350M-token budget:
+
+```bash
+python -m tfplslm.train --mode train --config configs/baseline_ssm.json --out artifacts/ssm
+python -m tfplslm.evaluate --checkpoint artifacts/ssm/last.pt \
+  --config configs/eval_ssm.json --out artifacts/ssm/eval
+python -m tfplslm.train --mode train --config configs/baseline_transformer.json --out artifacts/transformer
+python -m tfplslm.evaluate --checkpoint artifacts/transformer/last.pt --out artifacts/transformer/eval
+```
+
+Run one GPU job at a time. Start each new experiment in a new output directory;
+use `--resume` when continuing an existing run. The experiment controller scripts
+add rental-specific gates and expect the saved smoke/pilot/budget artifacts;
+the individual commands above do not require Vast.ai.
+
 Resume includes weights, optimizer, RNGs, sampler cursors, recurrent state,
 LR schedule position, token counts and config:
 
@@ -69,6 +85,26 @@ conditions share the same continuation. Wilson intervals accompany small samples
 The memory-scaling test measures persistent state bytes separately from allocator
 and peak VRAM; it does not claim constant total training memory.
 
+## Configuration and artifacts
+
+`configs/smoke.json` is the tiny overfit/resume test. `poc_70m.json` defines the
+77.1M-parameter experimental model; `baseline_ssm.json` removes explicit memory
+(72.6M parameters), and `baseline_transformer.json` defines a 75.9M-parameter
+512-token context model. `eval_memory.json` specifies all five paired state
+conditions; `eval_ssm.json` specifies normal and zero-state controls.
+
+Each run saves `config.json`, `metrics.jsonl`, `last.pt`, validation results,
+and generation samples. Recurrent models additionally save memory accuracy and
+individual answers, causal swaps, language-model state ablations, state-size
+scaling, and slot diagnostics. Large weights and prepared datasets are excluded
+from Git. Small result summaries and the reviewed report belong in `reports/`.
+
+The current memory writer mean-pools a chunk and receives gradients through at
+most two chunks. Long-history tests exceed this gradient horizon and, at 8k/32k,
+the synthetic training distances. Template-based tasks and one seed per model
+support a first diagnostic result, not a general claim about language ability or
+architectural superiority.
+
 ## Attribution and scope
 
 SSD kernels: [state-spaces/mamba](https://github.com/state-spaces/mamba), commit
@@ -77,5 +113,7 @@ Fetched into ignored `vendor/mamba`; no upstream kernel modifications.
 The namespace loader avoids importing the unused Mamba-1 CUDA extension.
 PyTorch depthwise convolution carries the convolution state explicitly.
 
-No trained weights or positive scientific result are implied by the code.
-Actual outcomes, deviations and costs belong in `reports/FINAL_REPORT.md`.
+Actual outcomes, negative results and costs are documented in
+[`reports/FINAL_REPORT.md`](reports/FINAL_REPORT.md). Rebuild its tables and plots
+with `python scripts/build_report.py` after restoring the local artifacts;
+`reports/interpretation.json` contains the reviewed qualitative conclusions.

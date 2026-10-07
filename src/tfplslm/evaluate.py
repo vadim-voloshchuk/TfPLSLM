@@ -136,8 +136,12 @@ def memory_eval(model,sp,config,out):
                     hit=cleaned==meta['answer']; correct.append(hit)
                     donor=cases[(i-1)%len(cases)][2]['answer']
                     donor_match.append(cleaned==donor)
+                    padding=length-len(cases[i][0])
                     details.append({**meta,'mode':mode,'prediction':text,'correct':hit,'donor_answer':donor,
-                                    'prompt_tokens':length,'history_state_bytes':before,'index':i,'answer_nll':answer_nll[i]})
+                                    'prompt_tokens':length,'history_state_bytes':before,'index':i,'answer_nll':answer_nll[i],
+                                    'prefix_padding_tokens':padding,
+                                    'aligned_fact_end':meta['fact_end']+padding,
+                                    'aligned_question_start':meta['question_start']+padding})
                 n=len(correct); hits=sum(correct); acc=hits/n
                 # Wilson interval prevents presenting tiny samples as precise.
                 z=1.96; center=(acc+z*z/(2*n))/(1+z*z/n)

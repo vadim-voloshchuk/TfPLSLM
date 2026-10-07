@@ -1,0 +1,32 @@
+{
+  "dataset": "deepvk/cultura_ru_edu",
+  "revision": "55788b7e4a9b1f64c95e4bdd040b6ea93aa4e403",
+  "seed": 20261007,
+  "tokenizer_sample": {
+    "documents": 4733,
+    "characters": 30005608,
+    "sha256": "86ec46d25ee43c54472a687525de016d3d2e77f1192258056ae9fddf53d51427"
+  },
+  "tokenizer_sha256": "5c0a01637dd16a8e976f16e8249c9fe3076777262533087785bfaee1e2537b74",
+  "validation": {
+    "documents": 573,
+    "tokens": 1000625,
+    "sha256": "6b885c92fb81e00d52e5cee4d8add8c7d73afb195933ce2b8222eb8a77f38f41",
+    "index_sha256": "96c0a52771b148613a6922c5d5d212bce6e2d5e98a36f44194fc6804f81bb021"
+  },
+  "train": {
+    "documents": 177405,
+    "tokens": 300005858,
+    "sha256": "d09e69b3e671f67a859baec985d49fa54e8d75bb3ebc688d942aed826194d7ae",
+    "index_sha256": "2390d161bb872b08f41a88062b84df73fb833a1850af659191bba8f5b568721b"
+  },
+  "synthetic": {
+    "documents": 62412,
+    "tokens": 50000122,
+    "sha256": "f6e3fc63e8966dc9da38f9837d2179fd8199d146695a5304919254e32606487d",
+    "index_sha256": "44b670340c5a226729ee8cc23339e14342c6e145752c9673e848ef293e71cbc7"
+  },
+  "seconds": 1025.1113994121552,
+  "exact_train_validation_overlap": 0,
+  "synthetic_generator": "v2: obsolete/replacement facts separated by 512 tokens"
+}
