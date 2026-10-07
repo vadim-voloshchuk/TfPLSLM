@@ -1,0 +1,24 @@
+{
+  "training": {
+    "validation_loss": 3.3609449659624446,
+    "perplexity": 28.816408542567235,
+    "validation_tokens": 204834,
+    "step": 7461,
+    "tokens_seen": 350025631,
+    "source_tokens": [
+      300145627,
+      49880004
+    ],
+    "seconds": 2269.0827779769897,
+    "stop_reason": "token_budget"
+  },
+  "validation": {
+    "validation_loss": 3.366895892178969,
+    "perplexity": 28.988404122551817,
+    "validation_tokens": 399150
+  },
+  "memory": [],
+  "lm_ablations": [],
+  "counterfactual": [],
+  "state_components": []
+}

@@ -1,0 +1,45 @@
+{
+  "matched": true,
+  "runs": [
+    {
+      "model": "poc",
+      "step": 7461,
+      "tokens_seen": 350025631,
+      "source_tokens": [
+        300145627,
+        49880004
+      ],
+      "sampler_sha256": "2bf9bdc7a44ad348e0f10fb8c316fee01eadee9611ffdf74c9fd26c38e0d966f",
+      "seed": 20261007,
+      "data": "data",
+      "checkpoint_source_commit": "e27c88d850b86669cc5e6a8bde6405b249cdeaea"
+    },
+    {
+      "model": "ssm",
+      "step": 7461,
+      "tokens_seen": 350025631,
+      "source_tokens": [
+        300145627,
+        49880004
+      ],
+      "sampler_sha256": "2bf9bdc7a44ad348e0f10fb8c316fee01eadee9611ffdf74c9fd26c38e0d966f",
+      "seed": 20261007,
+      "data": "data",
+      "checkpoint_source_commit": "060856b1a5fc0a8e9a2e4a6977825391980e3d02"
+    },
+    {
+      "model": "transformer",
+      "step": 7461,
+      "tokens_seen": 350025631,
+      "source_tokens": [
+        300145627,
+        49880004
+      ],
+      "sampler_sha256": "2bf9bdc7a44ad348e0f10fb8c316fee01eadee9611ffdf74c9fd26c38e0d966f",
+      "seed": 20261007,
+      "data": "data",
+      "checkpoint_source_commit": "060856b1a5fc0a8e9a2e4a6977825391980e3d02"
+    }
+  ],
+  "scope": "Same deterministic sampler, seed and prepared data; final RNG/cursors and token counts match"
+}

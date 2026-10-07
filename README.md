@@ -5,6 +5,33 @@ selective state-space blocks and a fixed 16×256 latent memory. No self-attentio
 or token-history KV cache appears in the experimental model. The separate
 Transformer baseline is explicitly labelled.
 
+## First completed experiment — 2026-10-07
+
+**Partially successful.** All three models trained from scratch on the same
+350,025,631 supervised tokens (300,145,627 natural / 49,880,004 synthetic),
+with one seed per model. The sampler's final RNG and document cursors match.
+
+| Model | Parameters | Natural validation PPL | Median useful tokens/s |
+|---|---:|---:|---:|
+| SSM + explicit memory | 77,087,008 | 26.36 | 76,322 |
+| SSM-only | 72,609,024 | 26.25 | 73,946 |
+| Transformer, 512-token window | 75,883,520 | 28.99 | 154,603 |
+
+Validation uses the same 399,150 target tokens. Context availability differs;
+these single runs do not establish general architectural superiority.
+
+The experimental model's mean whole-answer accuracy across seven synthetic task
+families is 77.23% at 512 tokens and 55.80% at 2k, but 0% at both 8k and 32k.
+Disabling its explicit memory lowers accuracy at 512 but not at 2k. A separate,
+post-hoc component-swap diagnostic finds that answers mainly follow SSD/conv
+state, not the explicit slots, at the final chunk boundary. Earlier effects of
+explicit memory on processing and learning remain possible.
+
+Persistent state remains 4,323,328 bytes per example through 128k processed tokens.
+Generation improves over random initialization but remains repetitive and
+unreliable. See the [full report](reports/FINAL_REPORT.md), including negative
+results, costs, generation samples, and the next controlled experiment.
+
 ## Architecture
 
 The default model has 77,087,008 parameters: 16 residual blocks, width 512,
@@ -77,11 +104,18 @@ manifest are written to `data/manifest.json`. Cyrillic and `ё` are preserved;
 byte fallback handles unseen characters. Validation is the dataset's separate
 split with exact hash overlap removed. No claim of near-duplicate removal is made.
 
-Long-memory tests use disjoint seeds, held-out names and modified templates.
+Long-memory tests use disjoint seeds and held-out names. Archive-related framing
+is added around the same underlying task templates; this is not a separate
+held-out template family.
 Distances are token gaps from the end of the factual prefix to the question.
 Accuracy is exact generated-answer match, with a terminal full stop ignored.
 Normal, zero, prematurely reset, rotated-document, and disabled-explicit-memory
 conditions share the same continuation. Wilson intervals accompany small samples.
+Zero and shuffled states are intervened on before the final chunk; reset retains
+only the last complete history chunk. In contrast, `no_memory` disables explicit
+memory reads and writes throughout the prefix and answer. The additional
+`eval_state_components.json` diagnostic swaps only the slots or only SSD/conv
+state at the final boundary, on a fresh seed, after the primary results.
 The memory-scaling test measures persistent state bytes separately from allocator
 and peak VRAM; it does not claim constant total training memory.
 
