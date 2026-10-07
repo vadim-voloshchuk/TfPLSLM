@@ -14,10 +14,10 @@ if make_plots:
 root=Path('.'); reports=root/'reports';reports.mkdir(exist_ok=True)
 plots=reports/'plots';plots.mkdir(exist_ok=True)
 def read(path,default=None):
-    p=Path(path);return json.loads(p.read_text()) if p.exists() else default
+    p=Path(path);return json.loads(p.read_text(encoding='utf-8')) if p.exists() else default
 def metrics(name):
     p=root/f'artifacts/{name}/metrics.jsonl'
-    return [json.loads(s) for s in p.read_text().splitlines()] if p.exists() else []
+    return [json.loads(s) for s in p.read_text(encoding='utf-8').splitlines()] if p.exists() else []
 
 names=[n for n in ['poc','ssm','transformer'] if Path(f'artifacts/{n}/final_training.json').exists()]
 manifest=read('data/manifest.json');bench=read('artifacts/benchmark64/benchmark.json')
@@ -47,6 +47,24 @@ if scale and make_plots:
     ax.set_ylim(0,max(r['state_bytes']/2**20 for r in scale)*1.3);ax.legend();fig.tight_layout()
     fig.savefig(plots/'state_memory.png',dpi=160);plt.close(fig)
 
+if make_plots and memory.get('poc'):
+    fig,ax=plt.subplots(figsize=(8,4.5))
+    distances=[512,2048,8192,32768]
+    curves=[('poc','normal','SSM + explicit memory','o-'),
+            ('poc','no_memory','Same model, explicit memory disabled','s--'),
+            ('poc','zero','Same model, zero state','x:'),
+            ('ssm','normal','Independently trained SSM-only','^-')]
+    for name,mode,label,style in curves:
+        selected=[r for r in memory.get(name,[]) if r['mode']==mode]
+        if len(selected)!=28:continue
+        accuracy=[100*sum(r['correct'] for r in selected if r['distance']==d)/
+                  sum(r['n'] for r in selected if r['distance']==d) for d in distances]
+        ax.plot(distances,accuracy,style,label=label)
+    ax.set(xscale='log',ylim=(-2,102),xlabel='Fact-to-question gap (tokens)',
+           ylabel='Whole-answer exact match (%)',title='Descriptive mean across seven synthetic task families')
+    ax.set_xticks(distances,labels=['512','2k','8k','32k'])
+    ax.legend(fontsize=8);fig.tight_layout();fig.savefig(plots/'memory_accuracy.png',dpi=160);plt.close(fig)
+
 rows=[]
 rows += ['# Итоговый отчёт TfPLSLM','',
          *(['> Промежуточная версия: POC завершён; независимый SSM-контроль ещё обучается. Его результаты и окончательный статус аренды будут добавлены.',''] if 'ssm' not in names else []),
@@ -63,7 +81,7 @@ for key in ['train','synthetic','validation']:
     d=manifest[key];rows.append(f"| {key} | {d['documents']:,} | {d['tokens']:,} |")
 rows += ['',f"SentencePiece BPE, vocab=16 384, byte fallback, нормализация identity. Обучающая выборка tokenizer: {manifest['tokenizer_sample']['documents']:,} документов. SHA-256: `{manifest['tokenizer_sha256']}`.",
          'Train/validation имеют нулевое пересечение точных текстовых SHA-256; near-duplicate удаление не выполнялось. Документы обучения выбираются с возвращением: число просмотренных токенов не равно числу уникальных токенов.',
-         'Синтетика использует отдельный test seed, новые имена и изменённые формулировки. Overwrite/forget разделяют старый и новый факт 512 токенами. Дистанция benchmark — точный токенный промежуток от конца последнего факта до начала вопроса.',
+         'Синтетика использует отдельный test seed и новые имена. В тесте добавлены вводные фразы про архив вокруг тех же базовых шаблонов; это не отдельное семейство held-out templates. Overwrite/forget разделяют старый и новый факт 512 токенами. Дистанция benchmark — точный токенный промежуток от конца последнего факта до начала вопроса.',
          'Обучающие дистанции синтетики: 64, 128, 256, 512, 1024 и 2048 токенов, с повышенной долей 512. Проверки 8192 и 32768 измеряют перенос за пределы обучающего распределения дистанций.',
          '', '## Проверки и производительность','',
          f"Tiny overfit в уменьшенной конфигурации `configs/smoke.json`: loss {smoke['first_loss']:.6f} → {smoke['final_loss']:.6f}. Разница параметров после сохранения/восстановления следующего optimizer step: {smoke['resume_max_parameter_difference']:.1e}.",
@@ -106,14 +124,16 @@ for dist in [512,2048,8192,32768]:
         values.append(f"{100*sum(r['correct'] for r in selected)/sum(r['n'] for r in selected):.2f}%" if selected else 'не измерено')
     rows.append('| '+str(dist)+' | '+' | '.join(values)+' |')
 rows += ['', 'Категории имеют одинаковое число примеров, но разные пространства ответов; это описательное среднее, не общий chance-adjusted score.',
+         '![Memory accuracy](plots/memory_accuracy.png)', '',
          'Ориентир случайного угадывания правильной метки при известной категории: 12,5% для цвета, 16,7% для temporal, 1/900 для трёхзначных кодов и 1/16¹² для exact ID. Их равновзвешенное среднее — около 4,23%; это теоретический ориентир, а не измеренная генеративная baseline.',
          '32 примера на категорию/дистанцию; не 32 независимых обучающих запуска. При 0/32 верхняя граница Wilson 95% около 10,7%, поэтому нулевое наблюдение не доказывает абсолютно нулевую способность.',
+         'Вмешательства на одной дистанции и сравнение двух SSM-моделей используют те же prompts. Между дистанциями генерируются новые примеры, поэтому линия на графике не является траекторией одного фиксированного факта.',
          '', interpretation['memory_quality'],
          '', '## Ablations на обычном русском тексте','', '| Модель | State | Loss | Δ к normal |','|---|---|---:|---:|']
 for name in names:
     for r in read(f'artifacts/{name}/eval/lm_ablations.json',[]):
         rows.append(f"| {name} | {r['mode']} | {r['loss']:.6f} | {r['loss_delta_from_normal']:+.6f} |")
-rows += ['', 'Zero обнуляет состояние перед каждым чанком; reset — перед каждой парой чанков; shuffle подставляет другую строку; no_memory отключает явную память, сохраняя SSD state. На synthetic benchmark интервенция делается перед одинаковым завершающим чанком; reset оставляет только последний полный чанк истории.',
+rows += ['', 'В natural LM ablations zero обнуляет состояние перед каждым чанком; reset — перед каждой парой чанков; shuffle подставляет другую строку. На synthetic benchmark zero и shuffle вмешиваются перед одинаковым завершающим чанком; reset вычисляет состояние только по последнему полному чанку истории. В обоих benchmark no_memory отключает чтение и запись явной памяти на всём префиксе и при ответе, сохраняя работу SSD state. Следовательно, no_memory — не разовое зануление слотов у последнего вопроса.',
          'Ablation no_memory изменяет уже обученную модель, а SSM-only обучен независимо. Они отвечают на разные вопросы. Одинаковый seed не означает идентичную инициализацию общих весов из-за различного порядка создания модулей.',
          '', '## Контрфактические проверки','', '| Модель | Подмена | Выход для красного / синего префикса | Mean abs logit Δ | KL |', '|---|---|---|---:|---:|']
 for name in [n for n in names if n!='transformer']:
@@ -126,6 +146,20 @@ for r in memory.get('poc',[]):
     if r['mode']=='shuffle' and r['distance'] in [512,2048]:
         rows.append(f"| {r['distance']} | {r['category']} | {100*r['accuracy']:.2f}% | {100*r['donor_answer_accuracy']:.2f}% |")
 rows += ['', 'Donor accuracy — совпадение с меткой того примера, чьё состояние было подставлено. В этих задачах оно информативнее простого изменения logits. Совпадения меток между разными примерами возможны, поэтому для малых пространств ответов их нужно сопоставлять с normal/zero.',
+         ]
+components=read('artifacts/poc/state_components/memory_results.json',[])
+if components:
+    rows += ['', '### Дополнительная диагностика компонентов состояния','',
+             'Эта проверка была добавлена после просмотра основных результатов. Использован отдельный seed 20261019, все семь категорий и 32 новых примера на категорию/дистанцию. Она не заменяет исходный benchmark. Подменяется либо только explicit memory, либо только SSD/conv state; остальные части остаются от исходного примера.',
+             '', '| Distance | State intervention | Correct recipient answer | Donor answer |', '|---:|---|---:|---:|']
+    for distance in [512,2048]:
+        for mode in ['normal','swap_memory','swap_ssm','shuffle']:
+            selected=[r for r in components if r['distance']==distance and r['mode']==mode]
+            if not selected:continue
+            n=sum(r['n'] for r in selected)
+            rows.append(f"| {distance} | {mode} | {100*sum(r['correct'] for r in selected)/n:.2f}% | {100*sum(r['donor_answer_accuracy']*r['n'] for r in selected)/n:.2f}% |")
+    rows += ['', interpretation.get('state_components','Подробные результаты и интервалы по категориям сохранены в `artifacts/poc/state_components`.')]
+rows += [
          '', '## Диагностика состояния','', '| Модель | Последний SSD RMS | Max abs за прогон | Последний memory RMS | Retain mean | Write mean | Dead slot fraction |', '|---|---:|---:|---:|---:|---:|---:|']
 for name in [n for n in names if n!='transformer']:
     m=[r for r in metrics(name) if 'ssm_rms' in r];r=m[-1]
@@ -137,6 +171,18 @@ for r in scale: rows.append(f"| {r['history_tokens']:,} | {r['state_bytes']:,} |
 rows += ['', '![State memory](plots/state_memory.png)',
          'Это фиксированный размер recurrent working state при фиксированном batch/chunk, а не утверждение O(1) о всей системе или обучении.',
          '', '## Примеры генерации','']
+generation_bundle={'untrained':read('artifacts/untrained/generation_samples.json',[]),
+                   'pilot_3m':read('artifacts/short_real/eval/generation_samples.json',[]),
+                   'historical_poc':[],
+                   'final':{name:read(f'artifacts/{name}/eval/generation_samples.json',[]) for name in names}}
+for directory in sorted(Path('artifacts/checkpoint_samples').glob('step_*')):
+    info=read(directory/'checkpoint_info.json')
+    if info:
+        generation_bundle['historical_poc'].append({**info,'samples':read(directory/'generation_samples.json',[])})
+generation_bundle['historical_poc'].sort(key=lambda row:row['tokens_seen'])
+rows += ['Ниже приведены все пять финальных POC-продолжений: temperature=0,8, top-k=40, максимум 160 новых токенов. [Полная подборка JSON](results/generation_samples.json) также содержит необученную модель, pilot, сохранённые промежуточные POC-checkpoints и финальные контрольные модели. Это качественная иллюстрация, а не автоматическая оценка связности.','']
+if generation_bundle['historical_poc']:
+    rows += ['Сэмплы сохранённых промежуточных POC-checkpoints: '+', '.join(f"{r['tokens_seen']:,} токенов (шаг {r['step']})" for r in generation_bundle['historical_poc'])+'.','']
 for r in read('artifacts/poc/eval/generation_samples.json',[]):
     rows += [f"**Prompt:** {r['prompt']}",'',r['continuation'],'']
 rows += ['## Ограничения и научная интерпретация','',
@@ -157,11 +203,18 @@ if runtime:
              runtime['status_text'], '',
              f"Время аренды до команды остановки: **{runtime['rental_hours']:.3f} ч**, оценка по зафиксированной total-ставке: **${runtime['estimated_running_cost']:.2f}**. В эту оценку не включены отдельные bandwidth charges и хранение после остановки.",
              'Контрольные суммы checkpoints находятся в `checkpoint_verification.json`; данные и токенизатор сверены с manifest. Остановка сохраняет диск контейнера, поэтому storage продолжает тарифицироваться.']
+stream=read('artifacts/training_stream_comparison.json')
+if stream:
+    rows += ['', '## Проверка одинакового потока данных','',
+             f"Аудит завершённых прогонов: matched = **{stream['matched']}**. Сверены seed, шаг, счётчики целевых токенов по источникам, финальный RNG и документные курсоры детерминированного sampler. Подробности и source commits checkpoint — в `results/training_stream_comparison.json`."]
 (reports/'results').mkdir(exist_ok=True)
+(reports/'results'/'generation_samples.json').write_text(json.dumps(generation_bundle,indent=2,ensure_ascii=False),encoding='utf-8')
+if stream:(reports/'results/training_stream_comparison.json').write_text(json.dumps(stream,indent=2),encoding='utf-8')
 for name in names:
     summary={'training':final[name],'validation':validation[name],
              'memory':memory[name],'lm_ablations':read(f'artifacts/{name}/eval/lm_ablations.json',[]),
-             'counterfactual':read(f'artifacts/{name}/eval/counterfactual.json',[])}
+             'counterfactual':read(f'artifacts/{name}/eval/counterfactual.json',[]),
+             'state_components':components if name=='poc' else []}
     (reports/'results'/f'{name}.json').write_text(json.dumps(summary,indent=2,ensure_ascii=False),encoding='utf-8')
 (reports/'FINAL_REPORT.md').write_text('\n'.join(rows),encoding='utf-8')
 print('REPORT_WRITTEN',flush=True)

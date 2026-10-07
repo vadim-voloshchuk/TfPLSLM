@@ -1,0 +1,8 @@
+{
+  "seed": 20261019,
+  "distances": [512, 2048],
+  "categories": ["semantic", "exact", "associative", "overwrite", "forget", "temporal", "multihop"],
+  "examples_per_category": 32,
+  "ablations": ["normal", "swap_memory", "swap_ssm", "shuffle"],
+  "scope": "Post-hoc diagnostic of state components, on a fresh seed; separate from the original benchmark"
+}

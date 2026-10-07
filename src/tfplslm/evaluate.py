@@ -123,6 +123,10 @@ def memory_eval(model,sp,config,out):
                     if mode=='shuffle':
                         # Rotation is a derangement; metadata records the donor answer.
                         state=tree_map(lambda x:x.roll(1,0),state)
+                    elif mode=='swap_memory':
+                        state['memory']=state['memory'].roll(1,0)
+                    elif mode=='swap_ssm':
+                        state['layers']=tree_map(lambda x:x.roll(1,0),state['layers'])
                 before=state_bytes(state)
                 last,state=consume(model,ids[:,cut:],state,disable_memory=disabled)
                 answer_nll=score_answers(model,last,state,[a for p,a,m in cases],disable_memory=disabled)
